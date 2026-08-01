@@ -69,7 +69,7 @@ func ResponseRewriter() gin.HandlerFunc {
 		if rewritten {
 			bw.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			bw.ResponseWriter.WriteHeader(bw.status)
-			bw.ResponseWriter.Write(body)
+			_, _ = bw.ResponseWriter.Write(body)
 			return
 		}
 
@@ -107,7 +107,7 @@ func writeOriginal(bw *responseBuffer) {
 	if bw.status > 0 {
 		bw.ResponseWriter.WriteHeader(bw.status)
 	}
-	bw.ResponseWriter.Write(bw.buf.Bytes())
+	_, _ = bw.ResponseWriter.Write(bw.buf.Bytes())
 }
 
 // responseBuffer 拦截写入 gin.ResponseWriter 的数据
