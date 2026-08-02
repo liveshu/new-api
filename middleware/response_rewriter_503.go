@@ -12,24 +12,24 @@ import (
 )
 
 // 匹配中文格式：分组 xxx 下模型
-// 例：分组 default claude 下模型 gpt-4 无可用渠道
-// 支持分组名包含空格（如 "default claude"）
-var zhGroupPattern = regexp.MustCompile(`(分组\s+)(.*?)(\s+下模型)`)
+// 支持分组名包含空格（如 "默认 分组"）
+var zhGroupPattern = regexp.MustCompile(`分组\s+(.+?)\s+下模型`)
 
 // 匹配英文格式：under group xxx (distributor)
-// 例：No available channel for model gpt-4 under group default claude (distributor)
 // 支持分组名包含空格（如 "default claude"）
-var enGroupPattern = regexp.MustCompile(`(under group\s+)(.*?)(\s*\()`)
+var enGroupPattern = regexp.MustCompile(`under group\s+(.+?)\s*\(`)
 
 // ResponseRewriter 拦截上游透传的 503 错误响应，
 // 自动从当前请求 context 中获取本站点分组名，替换上游的分组名。
 //
 // 分组名来源（按优先级）：
-//   - ContextKeyUsingGroup：auth 中间件设置，来自 token 指定或用户默认分组
-//   - ContextKeyUserGroup：用户主分组（fallback）
-//   - ContextKeyAutoGroup：auto 模式下实际解析到的分组（fallback）
+// - ContextKeyUsingGroup：auth 中间件设置，来自 token 指定或用户默认分组
+// - ContextKeyUserGroup：用户主分组（fallback）
+// - ContextKeyAutoGroup：auto 模式下实际解析到的分组（fallback）
 //
 // 无需传参，中间件自动从 gin context 读取。
+//
+// 兼容 OpenAI 格式和 Claude 格式的 503 响应。
 func ResponseRewriter() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 用自定义 writer 捕获响应内容到 buffer
@@ -40,6 +40,7 @@ func ResponseRewriter() gin.HandlerFunc {
 		c.Writer = bw
 
 		c.Next()
+
 		// 此时所有 handler 和 defer 块都已执行完毕，
 		// 响应内容（包括 c.JSON 写入的）已缓存到 bw.buf 中
 
@@ -59,16 +60,22 @@ func ResponseRewriter() gin.HandlerFunc {
 		}
 
 		rewritten := false
-		if zhGroupPattern.Match(body) {
-			body = zhGroupPattern.ReplaceAll(body, []byte("${1}"+localGroup+"${3}"))
+
+		// 处理英文格式：用 FindSubmatch 提取分组名，用 bytes.Replace 替换
+		if matches := enGroupPattern.FindSubmatch(body); len(matches) >= 2 {
+			body = bytes.Replace(body, matches[1], []byte(localGroup), 1)
 			rewritten = true
 		}
-		if enGroupPattern.Match(body) {
-			body = enGroupPattern.ReplaceAll(body, []byte("${1}"+localGroup))
+
+		// 处理中文格式
+		if matches := zhGroupPattern.FindSubmatch(body); len(matches) >= 2 {
+			body = bytes.Replace(body, matches[1], []byte(localGroup), 1)
 			rewritten = true
 		}
 
 		if rewritten {
+			// 清理替换可能产生的多余空格
+			body = bytes.Replace(body, []byte("  ("), []byte(" ("), -1)
 			bw.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			bw.ResponseWriter.WriteHeader(bw.status)
 			_, _ = bw.ResponseWriter.Write(body)
@@ -105,6 +112,7 @@ func resolveLocalGroup(c *gin.Context) string {
 	return ""
 }
 
+// writeOriginal 将原始缓存的响应原样写回客户端
 func writeOriginal(bw *responseBuffer) {
 	if bw.status > 0 {
 		bw.ResponseWriter.WriteHeader(bw.status)
@@ -119,10 +127,12 @@ type responseBuffer struct {
 	status int
 }
 
+// WriteHeader 捕获状态码但不立即写入下游 ResponseWriter
 func (w *responseBuffer) WriteHeader(code int) {
 	w.status = code
 }
 
+// Write 将数据写入缓冲区而非直接写入 ResponseWriter
 func (w *responseBuffer) Write(b []byte) (int, error) {
 	return w.buf.Write(b)
 }
