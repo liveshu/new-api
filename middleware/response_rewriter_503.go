@@ -12,12 +12,14 @@ import (
 )
 
 // 匹配中文格式：分组 xxx 下模型
-// 例：分组 default 下模型 gpt-4 无可用渠道
-var zhGroupPattern = regexp.MustCompile(`(分组\s+)(\S+)(\s+下模型)`)
+// 例：分组 default claude 下模型 gpt-4 无可用渠道
+// 支持分组名包含空格（如 "default claude"）
+var zhGroupPattern = regexp.MustCompile(`(分组\s+)(.*?)(\s+下模型)`)
 
-// 匹配英文格式：under group xxx
-// 例：No available channel for model gpt-4 under group default
-var enGroupPattern = regexp.MustCompile(`(under group\s+)(\S+)`)
+// 匹配英文格式：under group xxx (distributor)
+// 例：No available channel for model gpt-4 under group default claude (distributor)
+// 支持分组名包含空格（如 "default claude"）
+var enGroupPattern = regexp.MustCompile(`(under group\s+)(.*?)(\s*\()`)
 
 // ResponseRewriter 拦截上游透传的 503 错误响应，
 // 自动从当前请求 context 中获取本站点分组名，替换上游的分组名。
