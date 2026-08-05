@@ -5,104 +5,122 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/gin-gonic/gin"
 )
 
-// 匹配中文格式：分组 xxx 下模型
-// 支持分组名包含空格（如 "默认 分组"）
 var zhGroupPattern = regexp.MustCompile(`分组\s+(.+?)\s+下模型`)
-
-// 匹配英文格式：under group xxx (distributor)
-// 支持分组名包含空格（如 "default claude"）
 var enGroupPattern = regexp.MustCompile(`under group\s+(.+?)\s*\(`)
 
-// ResponseRewriter 拦截上游透传的 503 错误响应，
-// 自动从当前请求 context 中获取本站点分组名，替换上游的分组名。
-//
-// 分组名来源（按优先级）：
-// - ContextKeyUsingGroup：auth 中间件设置，来自 token 指定或用户默认分组
-// - ContextKeyUserGroup：用户主分组（fallback）
-// - ContextKeyAutoGroup：auto 模式下实际解析到的分组（fallback）
-//
-// 无需传参，中间件自动从 gin context 读取。
-//
-// 兼容 OpenAI 格式和 Claude 格式的 503 响应。
 func ResponseRewriter() gin.HandlerFunc {
 	return func(c *gin.Context) {
-
-		// 检查是否是流式请求（SSE），如果是则跳过重写逻辑
-		accept := c.GetHeader("Accept")
-		if accept == "text/event-stream" {
-			c.Next()
-			return
-		}
-
-		// 用自定义 writer 捕获响应内容到 buffer
-		bw := &responseBuffer{
+		bw := &flushableBuffer{
 			ResponseWriter: c.Writer,
 			buf:            &bytes.Buffer{},
 		}
 		c.Writer = bw
-
 		c.Next()
 
-		// 此时所有 handler 和 defer 块都已执行完毕，
-		// 响应内容（包括 c.JSON 写入的）已缓存到 bw.buf 中
+		// 如果是流式响应，数据已经通过 Flush 实时发送了，直接返回
+		if bw.streamed {
+			return
+		}
 
-		// 只对 503 做检查和替换
+		// 非流式响应，检查是否需要重写
 		if bw.status != http.StatusServiceUnavailable {
-			writeOriginal(bw)
+			bw.ResponseWriter.WriteHeader(bw.status)
+			_, _ = bw.ResponseWriter.Write(bw.buf.Bytes())
 			return
 		}
 
 		body := bw.buf.Bytes()
-
-		// 从 context 获取本站点的分组名
 		localGroup := resolveLocalGroup(c)
 		if localGroup == "" {
-			writeOriginal(bw)
+			bw.ResponseWriter.WriteHeader(bw.status)
+			_, _ = bw.ResponseWriter.Write(body)
 			return
 		}
 
 		rewritten := false
-
-		// 处理英文格式：用 FindSubmatch 提取分组名，用 bytes.Replace 替换
 		if matches := enGroupPattern.FindSubmatch(body); len(matches) >= 2 {
 			body = bytes.Replace(body, matches[1], []byte(localGroup), 1)
 			rewritten = true
 		}
-
-		// 处理中文格式
 		if matches := zhGroupPattern.FindSubmatch(body); len(matches) >= 2 {
 			body = bytes.Replace(body, matches[1], []byte(localGroup), 1)
 			rewritten = true
 		}
 
 		if rewritten {
-			// 清理替换可能产生的多余空格
-			body = bytes.Replace(body, []byte("  ("), []byte(" ("), -1)
+			body = bytes.Replace(body, []byte(" ("), []byte(" ("), -1)
 			bw.Header().Set("Content-Length", strconv.Itoa(len(body)))
 			bw.ResponseWriter.WriteHeader(bw.status)
 			_, _ = bw.ResponseWriter.Write(body)
 			return
 		}
 
-		writeOriginal(bw)
+		bw.ResponseWriter.WriteHeader(bw.status)
+		_, _ = bw.ResponseWriter.Write(body)
 	}
 }
 
-// resolveLocalGroup 按优先级获取本站点应展示的分组名
+// flushableBuffer 是一个可 flush 的 response buffer
+// 当检测到流式响应时，数据会直接 flush 到客户端
+// 非流式响应会被缓冲，用于后续重写
+type flushableBuffer struct {
+	gin.ResponseWriter
+	buf      *bytes.Buffer
+	status   int
+	streamed bool // 标记是否已检测到流式响应并实时发送
+}
+
+func (w *flushableBuffer) Write(b []byte) (int, error) {
+	// 检查是否是流式响应（首次写入时检测）
+	if !w.streamed {
+		contentType := w.ResponseWriter.Header().Get("Content-Type")
+		if strings.Contains(contentType, "text/event-stream") {
+			w.streamed = true
+			// 如果之前有缓冲的数据，先发送出去
+			if w.buf.Len() > 0 {
+				w.ResponseWriter.WriteHeader(w.status)
+				w.ResponseWriter.Write(w.buf.Bytes())
+				w.buf.Reset()
+			}
+		}
+	}
+
+	// 如果是流式响应，直接写入并 flush
+	if w.streamed {
+		n, err := w.ResponseWriter.Write(b)
+		if f, ok := w.ResponseWriter.(http.Flusher); ok {
+			f.Flush()
+		}
+		return n, err
+	}
+
+	// 非流式，缓冲起来
+	return w.buf.Write(b)
+}
+
+func (w *flushableBuffer) WriteHeader(code int) {
+	w.status = code
+	// 不要立即写入 ResponseWriter，等 Write 时判断
+}
+
+func (w *flushableBuffer) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func resolveLocalGroup(c *gin.Context) string {
-	// 优先取当前请求使用的分组（auth 中间件设置）
 	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if group != "" && group != "auto" {
 		return group
 	}
-
-	// auto 模式下，尝试取 distributor 实际解析出的分组
 	if group == "auto" {
 		autoGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
 		if autoGroup != "" {
@@ -110,37 +128,9 @@ func resolveLocalGroup(c *gin.Context) string {
 		}
 		return "auto"
 	}
-
-	// fallback：取用户主分组
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 	if userGroup != "" {
 		return userGroup
 	}
-
 	return ""
-}
-
-// writeOriginal 将原始缓存的响应原样写回客户端
-func writeOriginal(bw *responseBuffer) {
-	if bw.status > 0 {
-		bw.ResponseWriter.WriteHeader(bw.status)
-	}
-	_, _ = bw.ResponseWriter.Write(bw.buf.Bytes())
-}
-
-// responseBuffer 拦截写入 gin.ResponseWriter 的数据
-type responseBuffer struct {
-	gin.ResponseWriter
-	buf    *bytes.Buffer
-	status int
-}
-
-// WriteHeader 捕获状态码但不立即写入下游 ResponseWriter
-func (w *responseBuffer) WriteHeader(code int) {
-	w.status = code
-}
-
-// Write 将数据写入缓冲区而非直接写入 ResponseWriter
-func (w *responseBuffer) Write(b []byte) (int, error) {
-	return w.buf.Write(b)
 }
