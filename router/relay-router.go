@@ -85,9 +85,6 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter := relayV1Router.Group("")
 		httpRouter.Use(middleware.Distribute())
 
-		// 2026-08-01 liveshu添加代码 用于对503响应进行修改
-		httpRouter.Use(middleware.ResponseRewriter())
-
 		// claude related routes
 		httpRouter.POST("/messages", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatClaude)

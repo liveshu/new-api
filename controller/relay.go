@@ -362,8 +362,18 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
 	//2026-08-05 liveshu
-	// ===== 新增：提前获取分组名 =====
+	// ===== 新增：改写错误信息中的上游分组名 =====
+	// 提前获取分组名，避免后续异步操作导致 context 不一致
 	localGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	if localGroup == "" {
+		localGroup = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	}
+
+	if localGroup != "" && err != nil {
+		errCopy := *err
+		relay.RewriteUpstreamGroup(&errCopy, localGroup)
+		err = &errCopy
+	}
 	// ===== 新增结束 =====
 
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
