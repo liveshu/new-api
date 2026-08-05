@@ -355,6 +355,11 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+	//2026-08-05 liveshu
+	// ===== 新增：提前获取分组名 =====
+	localGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	// ===== 新增结束 =====
+
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
@@ -365,6 +370,15 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	}
 
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
+		//2026-08-05 liveshu
+		// ===== 新增：503 错误时改写日志中的上游分组名 =====
+		if err.StatusCode == 503 && localGroup != "" {
+			errCopy := *err
+			relay.RewriteUpstreamGroup(&errCopy, localGroup)
+			err = &errCopy
+		}
+		// ===== 新增结束 =====
+
 		// 保存错误日志到mysql中
 		userId := c.GetInt("id")
 		tokenName := c.GetString("token_name")
