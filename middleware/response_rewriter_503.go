@@ -32,6 +32,14 @@ var enGroupPattern = regexp.MustCompile(`under group\s+(.+?)\s*\(`)
 // 兼容 OpenAI 格式和 Claude 格式的 503 响应。
 func ResponseRewriter() gin.HandlerFunc {
 	return func(c *gin.Context) {
+
+		// 检查是否是流式请求（SSE），如果是则跳过重写逻辑
+		accept := c.GetHeader("Accept")
+		if accept == "text/event-stream" {
+			c.Next()
+			return
+		}
+
 		// 用自定义 writer 捕获响应内容到 buffer
 		bw := &responseBuffer{
 			ResponseWriter: c.Writer,
