@@ -370,9 +370,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	}
 
 	if localGroup != "" && err != nil {
-		errCopy := *err
-		relay.RewriteUpstreamGroup(&errCopy, localGroup)
-		err = &errCopy
+		relay.RewriteUpstreamGroup(err, localGroup)
 	}
 	// ===== 新增结束 =====
 
