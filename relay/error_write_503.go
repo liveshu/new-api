@@ -34,4 +34,14 @@ func RewriteUpstreamGroup(err *types.NewAPIError, localGroup string) {
 	}
 
 	err.SetMessage(msg)
+
+	// ↓↓↓ 补这里：同步更新 RelayError，客户端实际读的是这个 ↓↓↓
+	switch re := err.RelayError.(type) {
+	case types.OpenAIError:
+		re.Message = msg
+		err.RelayError = re
+	case types.ClaudeError:
+		re.Message = msg
+		err.RelayError = re
+	}
 }
