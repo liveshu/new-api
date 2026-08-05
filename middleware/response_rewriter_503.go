@@ -28,24 +28,8 @@ func ResponseRewriter() gin.HandlerFunc {
 			return
 		}
 
-		if bw.status != http.StatusServiceUnavailable {
-			if bw.status > 0 {
-				bw.ResponseWriter.WriteHeader(bw.status)
-			}
-			_, _ = bw.ResponseWriter.Write(bw.buf.Bytes())
-			return
-		}
-
 		body := bw.buf.Bytes()
 		localGroup := resolveLocalGroup(c)
-
-		// 如果 localGroup 为空，使用用户的分组作为 fallback
-		if localGroup == "" {
-			userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-			if userGroup != "" {
-				localGroup = userGroup
-			}
-		}
 
 		if localGroup == "" {
 			if bw.status > 0 {
@@ -128,15 +112,12 @@ func (w *flushableBuffer) Flush() {
 	}
 }
 
-// resolveLocalGroup 按优先级获取本站点应展示的分组名
 func resolveLocalGroup(c *gin.Context) string {
-	// 优先取当前请求使用的分组（auth 中间件设置）
 	group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if group != "" && group != "auto" {
 		return group
 	}
 
-	// auto 模式下，尝试取 distributor 实际解析出的分组
 	if group == "auto" {
 		autoGroup := common.GetContextKeyString(c, constant.ContextKeyAutoGroup)
 		if autoGroup != "" {
@@ -145,7 +126,6 @@ func resolveLocalGroup(c *gin.Context) string {
 		return "auto"
 	}
 
-	// fallback：取用户主分组
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 	if userGroup != "" {
 		return userGroup
