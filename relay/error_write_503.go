@@ -3,7 +3,7 @@ package relay
 import (
 	"regexp"
 
-	"github.com/QuantumNous/new-api/types"
+	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
 // 匹配中文格式：分组 xxx 下模型
