@@ -1,55 +1,47 @@
 package relay
 
 import (
-	"fmt"
 	"regexp"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
-// 匹配中文格式：分组 xxx 下模型
 var zhGroupPattern = regexp.MustCompile(`分组\s+(.+?)\s+下模型`)
-
-// 匹配英文格式：under group xxx (distributor)
 var enGroupPattern = regexp.MustCompile(`under group\s+(.+?)\s*\(`)
 
-// RewriteUpstreamGroup 将错误信息中的上游分组名替换为本站分组名
 func RewriteUpstreamGroup(err *types.NewAPIError, localGroup string) {
 	if err == nil || localGroup == "" {
 		return
 	}
-
 	msg := err.Error()
 	if msg == "" {
 		return
 	}
 
-	// 英文格式替换
+	// 只处理 "No available channel" / "可用渠道不存在" 这类 model not found 错误
+	replaced := false
 	if enGroupPattern.MatchString(msg) {
 		msg = enGroupPattern.ReplaceAllString(msg, "under group "+localGroup+" (")
+		replaced = true
 	}
-
-	// 中文格式替换
 	if zhGroupPattern.MatchString(msg) {
 		msg = zhGroupPattern.ReplaceAllString(msg, "分组 "+localGroup+" 下模型")
+		replaced = true
+	}
+	if !replaced {
+		return
 	}
 
 	err.SetMessage(msg)
 
-	// 同步更新 RelayError，客户端实际读的是这个
 	switch re := err.RelayError.(type) {
 	case types.OpenAIError:
 		re.Message = msg
-		// Code 为空时用 errorCode 兜底，修复 Claude 格式下 type 丢失的问题
-		if re.Code == nil || fmt.Sprintf("%v", re.Code) == "" {
-			re.Code = string(err.GetErrorCode())
-		}
+		re.Code = "model_not_found"
 		err.RelayError = re
 	case types.ClaudeError:
 		re.Message = msg
-		if re.Type == "" {
-			re.Type = string(err.GetErrorCode())
-		}
+		re.Type = "model_not_found"
 		err.RelayError = re
 	}
 }
