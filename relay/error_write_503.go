@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"fmt"
 	"regexp"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -35,13 +36,20 @@ func RewriteUpstreamGroup(err *types.NewAPIError, localGroup string) {
 
 	err.SetMessage(msg)
 
-	// ↓↓↓ 补这里：同步更新 RelayError，客户端实际读的是这个 ↓↓↓
+	// 同步更新 RelayError，客户端实际读的是这个
 	switch re := err.RelayError.(type) {
 	case types.OpenAIError:
 		re.Message = msg
+		// Code 为空时用 errorCode 兜底，修复 Claude 格式下 type 丢失的问题
+		if re.Code == nil || fmt.Sprintf("%v", re.Code) == "" {
+			re.Code = string(err.GetErrorCode())
+		}
 		err.RelayError = re
 	case types.ClaudeError:
 		re.Message = msg
+		if re.Type == "" {
+			re.Type = string(err.GetErrorCode())
+		}
 		err.RelayError = re
 	}
 }
