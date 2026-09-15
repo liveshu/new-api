@@ -365,6 +365,26 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	// ===== 新增：改写错误信息中的上游分组名 =====
 	// 提前获取分组名，避免后续异步操作导致 context 不一致
 	localGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+
+	//2026-09-15
+	// ===== 新增：统一上游 429 错误响应 =====
+	if err != nil && err.StatusCode == 429 {
+		const rateLimitMsg = "Resource has been exhausted (e.g. check quota)."
+		err.SetMessage(rateLimitMsg)
+
+		switch re := err.RelayError.(type) {
+		case types.OpenAIError:
+			re.Message = rateLimitMsg
+			//re.Code = "rate_limit_exceeded"
+			err.RelayError = re
+		case types.ClaudeError:
+			re.Message = rateLimitMsg
+			//re.Type = "rate_limit_exceeded"
+			err.RelayError = re
+		}
+	}
+	// ===== 新增结束 =====
+
 	if localGroup == "" {
 		localGroup = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 	}
