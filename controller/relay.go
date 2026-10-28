@@ -330,12 +330,14 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) {
-	// Preserve the local group in upstream errors before logging or returning them.
+	// BEGIN: 503 错误分组改写
+	// 在统一错误处理前改写，日志和普通转发错误响应共用修改后的错误。
 	localGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 	if localGroup == "" {
 		localGroup = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 	}
 	relay.RewriteUpstreamGroup(err, localGroup)
+	// END: 503 错误分组改写。
 	service.ProcessChannelError(c, channelError, err, relayInfo)
 }
 

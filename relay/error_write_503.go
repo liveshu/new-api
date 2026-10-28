@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
+// BEGIN: 503 错误分组改写工具（保留原有中英文匹配和错误字段同步行为）。
 var zhGroupPattern = regexp.MustCompile(`分组\s+(.+?)\s+下模型`)
 var enGroupPattern = regexp.MustCompile(`under group\s+(.+?)\s*\(`)
 
@@ -45,3 +46,5 @@ func RewriteUpstreamGroup(err *types.NewAPIError, localGroup string) {
 		err.RelayError = re
 	}
 }
+
+// END: 503 错误分组改写工具。
