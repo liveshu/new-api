@@ -50,8 +50,13 @@ export function Channels() {
     staleTime: 5 * 60 * 1000,
   })
   const retryTimes = channelOpsQuery.data?.data?.retry_times
+  // BEGIN: 默认次数不再被描述为所有分组的最大次数。
+  const groupRetryCount = channelOpsQuery.data?.data?.group_retry_count ?? 0
   const retryLabel =
-    typeof retryTimes === 'number' ? `${t('Max Retries')}: ${retryTimes}` : null
+    typeof retryTimes === 'number'
+      ? t('Default retries: {{count}}', { count: retryTimes })
+      : null
+  // END: 固定分组预算摘要。
   let retryBadge = null
   if (retryLabel) {
     retryBadge = isRoot ? (
@@ -75,7 +80,10 @@ export function Channels() {
           <Settings2 data-icon='inline-end' />
         </TooltipTrigger>
         <TooltipContent>
+          {/* BEGIN: 在现有设置入口说明有分组覆盖。 */}
           <p>{t('Retry Settings')}</p>
+          <p>{t('Group overrides: {{count}}', { count: groupRetryCount })}</p>
+          {/* END: 固定分组覆盖摘要。 */}
         </TooltipContent>
       </Tooltip>
     ) : (

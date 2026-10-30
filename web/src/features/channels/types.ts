@@ -188,6 +188,9 @@ export interface ChannelOpsResponse {
   message?: string
   data?: {
     retry_times: number
+    // BEGIN: 新后端追加的覆盖组数量，兼容旧响应。
+    group_retry_count?: number
+    // END: 固定分组摘要类型。
     request_policy?: {
       automatic_disable: boolean
       source: string

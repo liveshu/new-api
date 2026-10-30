@@ -21,6 +21,9 @@ import type { SecuritySettings } from '../types'
 
 export type RetrySettings = {
   RetryTimes: number
+  // BEGIN: 请求策略中的固定分组 JSON 映射。
+  GroupRetryTimes: string
+  // END: 固定分组配置类型。
   AutomaticRetryStatusCodes: string
 }
 export type HealthSettings = {
@@ -48,6 +51,9 @@ export type RequestPolicySettings = RetrySettings &
 
 export const defaultRequestPolicySettings: RequestPolicySettings = {
   RetryTimes: 0,
+  // BEGIN: 默认空覆盖，沿用全局次数。
+  GroupRetryTimes: '{}',
+  // END: 固定分组配置默认值。
   AutomaticRetryStatusCodes:
     '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
   ChannelDisableThreshold: '',

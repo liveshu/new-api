@@ -22,7 +22,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { SettingsPageProvider } from '../../components/settings-page-context'
+// BEGIN: 固定分组映射校验回归。
+import { validGroupRetries, normalizeGroupRetries } from '../routing-form'
 import { RoutingPolicySection } from '../routing-section'
+// END: 固定分组测试导入。
 
 const options = {
   RetryTimes: '2',
@@ -52,29 +55,131 @@ const options = {
 }
 let currentOptions: Record<string, string>
 let client: QueryClient
+// BEGIN: 固定组表单保存 0、恢复继承、非法值和失败保留草稿。
+// BEGIN: 分组名按内容宽度排列，数字紧邻，长名称可换行。
+it('keeps the retry input beside its group label without stretching the label', async () => {
+  const group = 'vip-with-a-long-group-name'.repeat(5)
+  currentOptions.GroupRetryTimes = JSON.stringify({ [group]: 2 })
+  show()
+  const input = await screen.findByRole('spinbutton', {
+    name: `Retries for ${group}`,
+  })
+  const label = screen.getByText(`Retries for ${group}`, { selector: 'label' })
+  expect(label).not.toHaveClass('flex-1')
+  expect(label).toHaveClass('max-w-full', 'break-words')
+  expect(input).toHaveClass('shrink-0')
+})
+// END: 固定分组紧凑布局回归。
+it('reuses the shared groups response and excludes auto from fixed group choices', async () => {
+  client.setQueryData(['groups'], { success: true, data: ['vip', 'auto'] })
+  show()
+  await userEvent.click(
+    await screen.findByRole('combobox', { name: 'Fixed group name' })
+  )
+  expect(await screen.findByRole('option', { name: 'vip' })).toBeVisible()
+  expect(screen.queryByRole('option', { name: 'auto' })).not.toBeInTheDocument()
+})
+
+it('saves an explicit zero override and removes it to restore inheritance', async () => {
+  currentOptions.GroupRetryTimes = '{"vip group":5}'
+  show()
+  const retries = await screen.findByRole('spinbutton', {
+    name: 'Retries for vip group',
+  })
+  fireEvent.change(retries, { target: { value: '0' } })
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(currentOptions.GroupRetryTimes).toBe('{"vip group":0}')
+  )
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Use default for vip group' })
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() => expect(currentOptions.GroupRetryTimes).toBe('{}'))
+})
+
+it('adds a fixed group and keeps its draft when saving fails', async () => {
+  show()
+  fireEvent.change(
+    await screen.findByRole('combobox', { name: 'Fixed group name' }),
+    { target: { value: 'new vip' } }
+  )
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Add group override' })
+  )
+  const retries = screen.getByRole('spinbutton', {
+    name: 'Retries for new vip',
+  })
+  fireEvent.change(retries, { target: { value: '4' } })
+  vi.mocked(api.patch).mockRejectedValueOnce(new Error('Save rejected'))
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() => expect(screen.getByText('Save rejected')).toBeVisible())
+  expect(retries).toHaveValue(4)
+})
+
+it('rejects invalid fixed group values and compares JSON independent of key order', () => {
+  for (const raw of [
+    'null',
+    '[]',
+    '{"auto":1}',
+    '{"vip":null}',
+    '{"vip":-1}',
+    '{"vip":100}',
+    '{"vip":1.5}',
+    '{"vip":"2"}',
+  ]) {
+    expect(validGroupRetries(raw)).toBe(false)
+  }
+  expect(validGroupRetries('{"vip group":0,"premium":99}')).toBe(true)
+  expect(normalizeGroupRetries('{"vip":0,"default":2}')).toBe(
+    normalizeGroupRetries('{"default":2,"vip":0}')
+  )
+})
+
+it('does not submit an out-of-range fixed group budget', async () => {
+  currentOptions.GroupRetryTimes = '{"vip":1}'
+  show()
+  fireEvent.change(
+    await screen.findByRole('spinbutton', { name: 'Retries for vip' }),
+    { target: { value: '100' } }
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+  expect(
+    await screen.findByText(
+      'Fixed group retries must map group names to integers from 0 to 99, excluding auto'
+    )
+  ).toBeVisible()
+  expect(api.patch).not.toHaveBeenCalled()
+})
+// END: 固定分组表单回归。
 beforeEach(() => {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   currentOptions = { ...options }
-  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
-    data: {
-      success: true,
-      data:
-        url === '/api/option/request_policy'
-          ? {
-              options: currentOptions,
-            }
-          : {
-              enabled: true,
-              total: 2,
-              unknown: 0,
-              by_rule_name: { 'Session rule': 2 },
-              cache_capacity: 100000,
-              cache_algo: 'lru',
-            },
-    },
-  }))
+  // BEGIN: 分组查询与共享缓存使用相同响应结构。
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/group/') {
+      return { data: { success: true, data: ['vip', 'auto'] } }
+    }
+    return {
+      data: {
+        success: true,
+        data:
+          url === '/api/option/request_policy'
+            ? { options: currentOptions }
+            : {
+                enabled: true,
+                total: 2,
+                unknown: 0,
+                by_rule_name: { 'Session rule': 2 },
+                cache_capacity: 100000,
+                cache_algo: 'lru',
+              },
+      },
+    }
+  })
+  // END: 固定分组列表回归数据。
   vi.spyOn(api, 'patch').mockImplementation(async (_url, request) => {
     currentOptions = {
       ...currentOptions,

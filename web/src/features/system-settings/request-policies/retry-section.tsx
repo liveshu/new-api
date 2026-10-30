@@ -31,7 +31,10 @@ import { Input } from '@/components/ui/input'
 
 import { SettingsCard } from '../components/settings-card'
 import { safeNumberFieldProps } from '../utils/numeric-field'
+// BEGIN: 复用固定分组业务编辑器。
+import { GroupRetryEditor } from './group-retry-editor'
 import type { RoutingPolicyFormValues } from './routing-form'
+// END: 固定分组编辑器导入。
 
 export function RetrySection() {
   const { t } = useTranslation()
@@ -61,6 +64,24 @@ export function RetrySection() {
             </FormItem>
           )}
         />
+        {/* BEGIN: 固定分组独立次数，复用同一表单保存与错误处理。 */}
+        <FormField
+          control={form.control}
+          name='GroupRetryTimes'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Fixed group retries')}</FormLabel>
+              <FormDescription>
+                {t(
+                  'Remove an override to inherit the global default. Auto always uses the global retry rules.'
+                )}
+              </FormDescription>
+              <GroupRetryEditor value={field.value} onChange={field.onChange} />
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        {/* END: 固定分组重试表单。 */}
         <FormField
           control={form.control}
           name='AutomaticRetryStatusCodes'

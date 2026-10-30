@@ -48,7 +48,37 @@ type RetryParam struct {
 	RequestPath  string
 	Retry        *int
 	resetNextTry bool
+	// BEGIN: 非 nil 表示本请求明确使用固定分组覆盖，0 同样有效。
+	retryLimit *int
+	// END: 固定分组重试预算。
 }
+
+// BEGIN: 固定组仅冻结显式覆盖；Auto 和继承配置继续读取原全局次数。
+func (p *RetryParam) InitRetryBudget() {
+	p.retryLimit = nil
+	if p.TokenGroup == "auto" || p.TokenGroup == "" {
+		return
+	}
+	if retries, ok := model.CurrentRequestPolicy().GroupRetryTimes[p.TokenGroup]; ok {
+		p.retryLimit = &retries
+	}
+}
+
+func (p *RetryParam) MaxRetries() int {
+	if p.retryLimit != nil {
+		return *p.retryLimit
+	}
+	return common.RetryTimes
+}
+
+func (p *RetryParam) RetryBudgetDecision(decision PolicyDecision) PolicyDecision {
+	if p.retryLimit != nil && decision.Reason == "attempt_budget_exhausted" {
+		decision.Source = "group_retry"
+	}
+	return decision
+}
+
+// END: 固定分组预算及决策来源；不改变错误类型和 Auto 切组规则。
 
 func (p *RetryParam) GetRetry() int {
 	if p.Retry == nil {

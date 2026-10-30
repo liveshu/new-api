@@ -173,7 +173,10 @@ func GetChannelOps(c *gin.Context) {
 		}
 	}
 	common.ApiSuccess(c, gin.H{
-		"retry_times":    snapshot.RetryTimes,
+		"retry_times": snapshot.RetryTimes,
+		// BEGIN: 保留旧默认次数字段，补充分组覆盖数量供渠道页说明。
+		"group_retry_count": len(snapshot.GroupRetryTimes),
+		// END: 固定分组重试摘要。
 		"request_policy": gin.H{"automatic_disable": automaticDisable, "source": source},
 	})
 }

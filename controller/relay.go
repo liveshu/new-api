@@ -174,7 +174,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	// BEGIN: 使用固定组覆盖预算；Auto 和未配置组保持全局行为。
+	retryParam.InitRetryBudget()
+	for ; retryParam.GetRetry() <= retryParam.MaxRetries(); retryParam.IncreaseRetry() {
+		// END: 固定分组重试循环入口。
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -223,7 +226,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
+		// BEGIN: 循环上限和剩余次数使用同一预算，并标注覆盖来源。
+		decision := retryParam.RetryBudgetDecision(service.DecideRelayRetry(c, newAPIError, retryParam.MaxRetries()-retryParam.GetRetry()))
+		// END: 固定分组重试决策。
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
@@ -545,7 +550,10 @@ func executeTaskSubmissionWith(
 		Retry:       common.GetPointer(0),
 	}
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	// BEGIN: 使用固定组覆盖预算；Auto 和未配置组保持全局行为。
+	retryParam.InitRetryBudget()
+	for ; retryParam.GetRetry() <= retryParam.MaxRetries(); retryParam.IncreaseRetry() {
+		// END: 固定分组重试循环入口。
 		stage = "select_channel"
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("before_attempt", retryParam.GetRetry()+1)
@@ -601,7 +609,9 @@ func executeTaskSubmissionWith(
 
 		taskAPIError := taskSubmissionAPIError(taskErr)
 		relayInfo.LastError = taskAPIError
-		decision := decideTaskRetry(c, taskErr, common.RetryTimes-retryParam.GetRetry())
+		// BEGIN: 任务提交沿用相同固定组预算，保留已接受任务的禁止重试规则。
+		decision := retryParam.RetryBudgetDecision(decideTaskRetry(c, taskErr, retryParam.MaxRetries()-retryParam.GetRetry()))
+		// END: 固定分组任务重试决策。
 		service.RecordPolicyFailure(c, channel.Id, taskAPIError, decision)
 		if !taskErr.LocalError {
 			processChannelError(c,

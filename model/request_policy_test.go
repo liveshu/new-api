@@ -78,6 +78,22 @@ func TestRequestPolicyDatabaseMatrix(t *testing.T) {
 			require.NoError(t, UpdateRequestPolicyOptions(map[string]string{"RetryTimes": "2", "channel_affinity_setting.rules": rules}))
 			assert.Equal(t, 2, CurrentRequestPolicy().RetryTimes)
 			assert.Equal(t, 2, common.RetryTimes, "the runtime global follows the same write")
+			// BEGIN: 分组覆盖通过真实 options 保存及重载，非法更新不污染有效值。
+			retriesJSON := `{"default":0,"vip group":5}`
+			require.NoError(t, UpdateOption("GroupRetryTimes", retriesJSON))
+			loadOptionsFromDatabase()
+			assert.Equal(t, map[string]int{"default": 0, "vip group": 5}, CurrentRequestPolicy().GroupRetryTimes)
+			for _, invalid := range []string{`null`, `[]`, `{"auto":1}`, `{"":1}`, `{"vip":null}`, `{"vip":-1}`, `{"vip":100}`, `{"vip":1.5}`, `{"vip":"2"}`, `{"vip":18446744073709551615}`} {
+				before := CurrentRequestPolicy()
+				assert.Error(t, UpdateRequestPolicyOptions(map[string]string{"GroupRetryTimes": invalid}))
+				assert.Same(t, before, CurrentRequestPolicy())
+			}
+			require.NoError(t, UpdateOptionsBulk(map[string]string{"GroupRetryTimes": `{"vip":99}`}))
+			loadOptionsFromDatabase()
+			assert.Equal(t, map[string]int{"vip": 99}, CurrentRequestPolicy().GroupRetryTimes)
+			require.NoError(t, UpdateOption("GroupRetryTimes", "{}"))
+			assert.Empty(t, CurrentRequestPolicy().GroupRetryTimes)
+			// END: 固定分组覆盖持久化回归。
 			require.NoError(t, UpdateOption("AutomaticRetryStatusCodes", "429,500-503"))
 			assert.Equal(t, "429,500-503", CurrentRequestPolicy().Options["AutomaticRetryStatusCodes"])
 			assert.Equal(t, "429,500-503", operation_setting.AutomaticRetryStatusCodesToString())

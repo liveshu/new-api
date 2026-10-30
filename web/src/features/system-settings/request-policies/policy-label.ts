@@ -5,6 +5,10 @@ import type { TFunction } from 'i18next'
 // sources reported by the channel operations summary.
 export function policyLabel(t: TFunction, value: string): string {
   switch (value) {
+    // BEGIN: 次数耗尽可以来自固定分组覆盖，而非全局默认。
+    case 'group_retry':
+      return t('Fixed group retry budget')
+    // END: 固定分组预算来源。
     case 'upstream_failure':
       return t('Upstream request failed')
     case 'request_failed':

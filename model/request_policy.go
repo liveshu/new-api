@@ -22,8 +22,11 @@ import (
 // settings API. It is rebuilt from the option map on every option write, so
 // the runtime globals updated by the same write never disagree with it.
 type RequestPolicySnapshot struct {
-	Affinity        operation_setting.ChannelAffinitySetting
-	RetryTimes      int
+	Affinity   operation_setting.ChannelAffinitySetting
+	RetryTimes int
+	// BEGIN: 固定分组重试次数覆盖，发布后只读。
+	GroupRetryTimes map[string]int
+	// END: 固定分组重试次数覆盖。
 	RetryCodes      []operation_setting.StatusCodeRange
 	DisableCodes    []operation_setting.StatusCodeRange
 	DisableKeywords []string
@@ -52,6 +55,9 @@ func requestPolicyDefaultOptions() map[string]string {
 		}
 	}
 	defaults["RetryTimes"] = strconv.Itoa(common.RetryTimes)
+	// BEGIN: 缺省空映射保持旧版全局重试行为。
+	defaults["GroupRetryTimes"] = "{}"
+	// END: 固定分组重试默认配置。
 	defaults["AutomaticRetryStatusCodes"] = operation_setting.AutomaticRetryStatusCodesToString()
 	defaults["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
 	defaults["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
@@ -65,6 +71,11 @@ func requestPolicyDefaultOptions() map[string]string {
 }
 
 func IsRequestPolicyOption(key string) bool {
+	// BEGIN: 固定分组重试复用请求策略事务和快照。
+	if key == "GroupRetryTimes" {
+		return true
+	}
+	// END: 固定分组重试配置登记。
 	if strings.HasPrefix(key, "channel_affinity_setting.") {
 		return true
 	}
@@ -130,6 +141,20 @@ func BuildRequestPolicy(options map[string]string) (*RequestPolicySnapshot, erro
 	if err != nil || snapshot.RetryTimes < 0 || snapshot.RetryTimes == math.MaxInt {
 		return nil, fmt.Errorf("retry times must be a non-negative integer with room for the initial attempt")
 	}
+	// BEGIN: 完整验证固定分组覆盖；显式 0 有效，null 和虚拟 auto 组无效。
+	var groupRetries map[string]json.RawMessage
+	if err := common.UnmarshalJsonStr(raw["GroupRetryTimes"], &groupRetries); err != nil || groupRetries == nil {
+		return nil, common.NewMessage("Fixed group retries must map group names to integers from 0 to 99, excluding auto")
+	}
+	snapshot.GroupRetryTimes = make(map[string]int, len(groupRetries))
+	for group, encoded := range groupRetries {
+		var retries *int
+		if strings.TrimSpace(group) == "" || group == "auto" || common.Unmarshal(encoded, &retries) != nil || retries == nil || *retries < 0 || *retries > 99 {
+			return nil, common.NewMessage("Fixed group retries must map group names to integers from 0 to 99, excluding auto")
+		}
+		snapshot.GroupRetryTimes[group] = *retries
+	}
+	// END: 固定分组覆盖校验。
 	snapshot.AutoDisable, err = strconv.ParseBool(raw["AutomaticDisableChannelEnabled"])
 	if err != nil {
 		return nil, err

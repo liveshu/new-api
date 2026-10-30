@@ -37,6 +37,9 @@ import { policyLabel } from './policy-label'
 import { RetrySection } from './retry-section'
 import {
   createRoutingPolicySchema,
+  // BEGIN: 分组覆盖按 JSON 语义比较。
+  normalizeGroupRetries,
+  // END: 固定分组比较工具。
   routingPolicyFormValues,
   routingPolicyOptions,
   type RoutingPolicyFormValues,
@@ -92,6 +95,11 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
     const delta = Object.fromEntries(
       Object.entries(next).filter(([key, value]) => {
         const previous = props.config.options[key]
+        // BEGIN: 空覆盖和旧配置相同，键顺序变化不触发保存。
+        if (key === 'GroupRetryTimes') {
+          return value !== normalizeGroupRetries(previous ?? '{}')
+        }
+        // END: 固定分组覆盖差异比较。
         if (key === 'channel_affinity_setting.rules') {
           return (
             JSON.stringify(JSON.parse(value)) !==
